@@ -1,11 +1,11 @@
 package net;
 
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
@@ -16,7 +16,6 @@ import java.util.Hashtable;
 import org.ccnx.ccn.CCNContentHandler;
 import org.ccnx.ccn.CCNHandle;
 import org.ccnx.ccn.config.ConfigurationException;
-import org.ccnx.ccn.protocol.Component;
 import org.ccnx.ccn.protocol.ContentName;
 import org.ccnx.ccn.protocol.ContentObject;
 import org.ccnx.ccn.protocol.Interest;
@@ -24,12 +23,11 @@ import org.ccnx.ccn.protocol.MalformedContentNameStringException;
 
 import net.Utils;
 import net.Http.HttpRequest;
-import net.Http.HttpResponse;
 
 
 public class HttpProxy {
 
-	private static final String ListFileName = "/home/asanzco/HttpProxy.list";
+	private static final String ListFileName = "HttpProxy.list";
 	
 	private ArrayList<HttpProxyListElement>HttpProxyList = new ArrayList<HttpProxyListElement>();
 	
@@ -69,7 +67,9 @@ public class HttpProxy {
 	
 	private void getHttpProxyList() throws IOException, Exception {
 		
-		File file = new File(ListFileName);
+		
+		String fileName = (new File(".")).getAbsolutePath() + "/src/net/" + ListFileName;
+		File file = new File(fileName);
 		if(!file.exists()) throw new Exception("Not found 'HttpProxy.list");
 		BufferedReader br = new BufferedReader(new FileReader(file));
 		
@@ -103,7 +103,7 @@ public class HttpProxy {
 			proxy = new HttpProxy();
 			proxy.launch();
 		} catch (Exception e) {
-			System.out.println(e.getMessage());
+			System.err.println(">" + e.getMessage());
 		}
 		
 	}
@@ -122,13 +122,13 @@ public class HttpProxy {
 				// Get the HttpRequest from the net
 				HttpRequest httpRequest = new HttpRequest();
 				httpRequest.readHttpRequest(s);
-				
+								
 				// If it can be send it will be sent to netfetch via CCN
 				if(!canBeSent(httpRequest)) throw new Exception("Url not supported");
 				SendInterest(httpRequest);
 				
 			} catch (Exception e) {
-				System.out.println("Error handling httpRequest: " + e.getMessage());
+				System.err.println(">Error handling httpRequest: " + e.getMessage());
 			}
 			
 		}
@@ -136,6 +136,10 @@ public class HttpProxy {
 		private void SendInterest(HttpRequest httpRequest) throws MalformedContentNameStringException, ConfigurationException, IOException {
 
 			Interest interest = Utils.parseInterest(_prefix, httpRequest);
+			System.out.println(".............................");
+			System.out.println("REGISTERING REQUEST");
+			System.out.println(httpRequest.toString());
+			System.out.println(".............................");
 			_handler.registerInterest(interest, s);
 						
 		}
@@ -152,8 +156,8 @@ public class HttpProxy {
 	private class ContentHandler implements CCNContentHandler {
 		
 		private Hashtable<String, ArrayList<Socket>> sockets = new Hashtable<String, ArrayList<Socket>>();
-		private Hashtable<String, String> responsesString = new Hashtable<String, String>();
-		private Hashtable<String, HttpResponse> responses = new Hashtable<String, HttpResponse>();
+		private Hashtable<String, ByteArrayOutputStream> responsesRaw = new Hashtable<String, ByteArrayOutputStream>();
+		private Hashtable<String, byte[]> responses = new Hashtable<String, byte[]>();
 		
 		@Override
 		public Interest handleContent(ContentObject contentObject, Interest interest) {
@@ -162,45 +166,49 @@ public class HttpProxy {
 			
 			String name = "";
 			int segment = 0;
-			int length = 0;
+			int size = 0;
 			
 			String nameData = contentObject.name().toString();
-			Pattern p = Pattern.compile("^((.*)/length(\\d+))(/=([\\dA-F]+))?$");
+			Pattern p = Pattern.compile("^((.*)/size(\\d+))(/=([\\dA-F]+))?$");
 			
 			Matcher matcher = p.matcher(nameData);
 			if (matcher.find()) {
 			    nameData = matcher.group(1);
 			    name = matcher.group(2);
-			    length = Integer.parseInt(matcher.group(3));
+			    size = Integer.parseInt(matcher.group(3));
 			    segment = Integer.parseInt(matcher.group(5), 16);	    
 			}
 
-			System.out.println("DATA RECIEVED: '" + nameData + "' : " + segment + " | len: " + length + " #for interest : " + name);
-			
-			synchronized (responsesString) {
-				String responseString;
-				if(responsesString.containsKey(name)) {
-					responseString = responsesString.get(name);
-					responsesString.remove(name);
-					responseString += Component.printNative(contentObject.content());
+			synchronized (responsesRaw) {
+				ByteArrayOutputStream response;
+				if(responsesRaw.containsKey(name)) {
+					response = responsesRaw.get(name);
+					responsesRaw.remove(name);
+					try {
+						response.write(contentObject.content());
+					} catch (IOException e) {
+					}
 				} else {
-					responseString = Component.printNative(contentObject.content());
+					response = new ByteArrayOutputStream();
+					try {
+						response.write(contentObject.content());
+					} catch (IOException e) {
+					}
 				}
 				try {
-					HttpResponse httpResponse = Utils.parseHttpRespose(responseString);
-					if(responseString.length() == length) {
-						System.out.println("DATA RECIEVED: '" + nameData + "' : " + segment + ": COMPLETED!" + " #for interest : " + name);
+					if(response.size() >= size) {
+						System.out.println(">DATA RECIEVED: '" + nameData + "' : " + segment + ": COMPLETED!" + " #for interest : " + name);
 						sendData = true;
 						synchronized (responses) {
-							responses.put(name, httpResponse);
+							responses.put(name, response.toByteArray());
 						}
 					} else {
-						System.out.println("DATA RECIEVED: '" + nameData + "' : " + segment + ": INCOMPLETED " + (httpResponse.toString().length()) + "/" + length + " #for interest : " + name);
-						responsesString.put(name, responseString);
+						System.out.println(">DATA RECIEVED: '" + nameData + "' : " + segment + ": INCOMPLETED " + response.size() + "/" + size + " #for interest : " + name);
+						responsesRaw.put(name, response);
 					}			
 				
 				} catch (Exception e) {
-					responsesString.put(name, responseString);
+					responsesRaw.put(name, response);
 				}				
 			}
 				
@@ -211,9 +219,9 @@ public class HttpProxy {
 			} else {
 				
 				try {
-					System.out.println("GENERATED NEW INTEREST: " + nameData + " : " + (segment+1) + " #for interest : " + name);
 					String newSegment = String.format("%0$"+4+"s", Integer.toHexString(segment+1)).replace(" ", "0");
 					interest.name(ContentName.fromURI(nameData + "/=" + newSegment));
+					System.out.println(">GENERATED NEW INTEREST: " + interest.name().toString() + " #for interest : " + name);
 					return interest;
 				} catch (MalformedContentNameStringException e) {
 				}
@@ -224,20 +232,18 @@ public class HttpProxy {
 		
 		private void SendRespose(String name) {
 			
-			HttpResponse httpResponse;
+			byte[] response;
 			synchronized (responses) {
-				httpResponse = responses.get(name);
+				response = responses.get(name);
 				responses.remove(name);
 			}
 			synchronized (sockets) {
 				for(Socket s : sockets.get(name)) {
 					try {
-						PrintWriter pw = new PrintWriter(new OutputStreamWriter(s.getOutputStream()));
-						System.out.println("SENDING to " + s + "......");
-						//System.out.println(httpResponse.toString());
-						//System.out.println("--------");
-						pw.println(httpResponse.toString());
-						pw.close();
+						BufferedOutputStream bos = new BufferedOutputStream(s.getOutputStream());
+						System.out.println(">SENDING to " + s + "...... " + name + " (" +response.length + ")");
+						bos.write(response);
+						bos.close();
 						s.close();
 					} catch (IOException e) {
 					}
@@ -248,7 +254,7 @@ public class HttpProxy {
 		
 		public void registerInterest(Interest interest, Socket socket) throws IOException {
 			
-			System.out.println("REGISTERING NEW INTEREST: " + interest.name());
+			System.out.println(">REGISTERING NEW INTEREST: " + interest.name());
 			
 			synchronized (sockets) {
 				if(sockets.containsKey(interest.name())) {

@@ -1,46 +1,59 @@
 package net;
 
-import net.Http.HttpRequest;
-import net.Http.HttpResponse;
+import java.io.IOException;
 
-import org.ccnx.ccn.protocol.Component;
+import net.Http.HttpRequest;
+
 import org.ccnx.ccn.protocol.ContentName;
-import org.ccnx.ccn.protocol.ContentObject;
 import org.ccnx.ccn.protocol.Interest;
 import org.ccnx.ccn.protocol.MalformedContentNameStringException;
+import org.springframework.security.crypto.codec.Base64;
 
 public class Utils {
 	
-	public static Interest parseInterest(ContentName prefix, HttpRequest httpRequest) throws MalformedContentNameStringException {
-		
+	public static Interest parseInterest(ContentName prefix, HttpRequest httpRequest) throws MalformedContentNameStringException, IOException {
+		/*
 		String path = httpRequest.Header().Path();
 		if (path.startsWith("http://")) path = path.substring(7);
 		if (path.startsWith("https://")) path = path.substring(8);
 		path = "/" + path;
 		
 		String method = httpRequest.Header().Method().toString();
+		System.out.println(a);
+		Interest interest = new Interest(prefix + method + path + a);
+		System.out.println("interest: " + interest.name().toString());
+		interest.answerOriginKind(0);
+		*/
 		
-		Interest interest = new Interest(prefix + method + path);
+		String request = new String(Base64.encode(httpRequest.toByteArray()));
+		
+		Interest interest = new Interest(prefix + request.replace("=", "/1"));
 		interest.answerOriginKind(0);
 		
 		return interest;
 		
 	}
 
-	public static HttpRequest parseHttpRequest(ContentName prefix, Interest interest) {
+	public static HttpRequest parseHttpRequest(ContentName prefix, Interest interest) throws Exception {
 		
 		HttpRequest httpRequest = new HttpRequest();
-		
+		/*
 		String aux = interest.name().toString().substring(prefix.toString().length());
 		String[] auxSplited = aux.split("/", 2);
 		
 		httpRequest.Header().Method(auxSplited[0]);
 		httpRequest.Header().Path("http://" + auxSplited[1]);
-				
+		*/
+		
+		byte[] request = Base64.decode(interest.name().toString().substring(prefix.toString().length()).replaceAll("/1", "=").getBytes());
+		httpRequest.parseRequest(request);
+		
 		return httpRequest;
 		
 	}
-	
+
+	/*
+	 
 	public static HttpResponse parseHttpRespose(String httpResponseString) throws Exception {
 		
 		HttpResponse httpResponse = new HttpResponse();
@@ -57,7 +70,7 @@ public class Utils {
 		StringBuilder builderBody = new StringBuilder();
 		for(; i < splited.length; i++)
 			builderBody.append(splited[i] + "\n");
-		httpResponse.Body().Content(builderBody.toString());
+		//httpResponse.Body().Content(builderBody.toString());
 		
 		return httpResponse;
 
@@ -79,20 +92,13 @@ public class Utils {
 		StringBuilder builderBody = new StringBuilder();
 		for(; i < contentSplited.length; i++)
 			builderBody.append(contentSplited[i] + "\n");
-		httpResponse.Body().Content(builderBody.toString());
+		//httpResponse.Body().Content(builderBody.toString());
 		
 		return httpResponse;
 		
 	}
 	
-	public static HttpResponse appendContentHttpResponse(ContentObject contentObject, HttpResponse httpResponse) {
-		
-		String newContent = Component.printNative(contentObject.content());
-		
-		httpResponse.Body().Content(httpResponse.Body().Content() + newContent);
-		
-		return httpResponse;
-		
-	}
+	*/
+
 }
 

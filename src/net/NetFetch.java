@@ -47,30 +47,41 @@ public class NetFetch implements CCNInterestHandler {
 	
 	public boolean handleInterest(Interest interest) {
 		
-		System.out.println("NetFetch: got new interest: " + interest);
+		System.out.println(">NetFetch: got new interest: " + interest);
 		
 		// Test to see if we need to respond to it.
 		if (!_prefix.isPrefixOf(interest.name())) {
-			System.out.println("Unexpected: got an interest not matching our prefix (which is " + _prefix + ")");
+			System.out.println(">Unexpected: got an interest not matching our prefix (which is " + _prefix + ")");
 			return false;
 		}
 		
 		if (SegmentationProfile.isSegment(interest.name()) && !SegmentationProfile.isFirstSegment(interest.name())) {
-			System.out.println("Got an interest for something other than a first segment, ignoring " + interest.name() + ".");
+			System.out.println(">Got an interest for something other than a first segment, ignoring " + interest.name() + ".");
 			return false;
 		} 
 		
-		HttpRequest httpRequest = Utils.parseHttpRequest(_prefix, interest);
+		HttpRequest httpRequest;
 		try {
-			HttpURLConnection con = httpRequest.SendRequest();
+			httpRequest = Utils.parseHttpRequest(_prefix, interest);
+			System.out.println(".............................");
+			System.out.println("REQUEST");
+			System.out.println(httpRequest.toString());
+			System.out.println(".............................");
+			System.out.println("Sending request....");
+			HttpURLConnection con = httpRequest.sendRequest();
 			HttpResponse httpResponse = new HttpResponse();
+			System.out.println("Reading response....");
 			httpResponse.readHttpResponse(con);
-
+			System.out.println(".............................");
+			System.out.println("RESPONSE");
+			System.out.println(httpResponse.toString());
+			System.out.println(".............................");
+			
 			CCNWriter cw;
 			try {
 				cw = new CCNWriter(interest.getContentName(), _handle);
 				cw.addOutstandingInterest(interest);
-				cw.put(ContentName.fromNative(interest.name().toString() + "/length" + httpResponse.toString().length()), httpResponse.toString());
+				cw.put(ContentName.fromNative(interest.name().toString() + "/size" + httpResponse.toByteArray().length), httpResponse.toByteArray());
 				cw.close();
 				return true;
 			} catch (IOException e) {
@@ -79,7 +90,7 @@ public class NetFetch implements CCNInterestHandler {
 			}
 		} catch (IOException e) {
 		} catch (Exception e) {
-		}
+		}			
 
 		return false;
 		
@@ -102,11 +113,11 @@ public class NetFetch implements CCNInterestHandler {
 				}
 			}
 		} catch (MalformedContentNameStringException e) {
-			System.out.println("bad ccn URI: " + e.getMessage());
+			System.out.println(">bad ccn URI: " + e.getMessage());
 		} catch (ConfigurationException e) {
-			System.err.println("Configuration exception running netfetch: " + e.getMessage());
+			System.err.println(">Configuration exception running netfetch: " + e.getMessage());
 		} catch (IOException e) {
-			System.err.println("IOException handling ccn packages: " + e.getMessage());
+			System.err.println(">IOException handling ccn packages: " + e.getMessage());
 		} finally {
 			if (null != netfetch) 
 				netfetch.shutdown();

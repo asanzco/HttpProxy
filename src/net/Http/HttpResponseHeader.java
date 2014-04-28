@@ -44,6 +44,7 @@ public class HttpResponseHeader extends HttpHeader {
 	private String via = "";
 	private String warning = "";
 	private String wwwAuthenticate = "";
+	private String xFrameOptions = "";
 	
 	public String Protocol() {
 		return "HTTP/" + this.httpVersion + "." + this.httpSubVersion;
@@ -128,8 +129,11 @@ public class HttpResponseHeader extends HttpHeader {
 	public void Warning(String value) { this.warning = value.trim(); }
 	public String WwwAuthenticate() { return this.wwwAuthenticate; }
 	public void WwwAuthenticate(String value) { this.wwwAuthenticate = value.trim(); }
+	public String XFrameOptions() { return this.xFrameOptions; }
+	public void XFrameOptions(String value) { this.xFrameOptions = value.trim(); }
 
-	protected void processFirstLine(String line) throws Exception {
+	@Override
+	protected void processStatusLine(String line) throws Exception {
 		
 		String[] fields = line.trim().split(" ");
 		
@@ -149,6 +153,7 @@ public class HttpResponseHeader extends HttpHeader {
 		
 	}
 
+	@Override
 	protected void processParameterLine(String line) {
 	
 		String[] fields = line.trim().split(":", 2);
@@ -225,22 +230,24 @@ public class HttpResponseHeader extends HttpHeader {
 				Warning(fields[1]);
 			else if(fields[0].toLowerCase().equals("www-authenticate"))
 				WwwAuthenticate(fields[1]);
+			else if(fields[0].toLowerCase().equals("x-frame-options"))
+				XFrameOptions(fields[1]);
 			
 		}
 		
 	}
 
 	@Override
-	public String toString() {
+	public String getHeaderString() {
+	
 		String s = "";
-		
-		s += Protocol() + " " + NCode() + " " + SCode() + "\n";
+	
 		if(!AccessControlAllowOrigin().equals("")) s += "Access-Control-Allow-Origin: " + AccessControlAllowOrigin() + "\n"; 
 		if(!AcceptRanges().equals("")) s += "Accept-Ranges: " + AcceptRanges() + "\n";
 		if(Age() >= 0) s += "Age: " + Age() + "\n";
 		if(!Allow().equals("")) s += "Allow: " + Allow() + "\n";
 		if(!CacheControl().equals("")) s += "Cache-Control: " + CacheControl() + "\n";
-		if(!Connection().equals("")) s += "Connection: " + Connection() + "\n";
+		//if(!Connection().equals("")) s += "Connection: " + Connection() + "\n";
 		if(!ContentEncoding().equals("")) s += "Content-Encoding: " + ContentEncoding() + "\n";
 		if(!ContentLanguage().equals("")) s += "Content-Language: " + ContentLanguage() + "\n";
 		if(ContentLength() >= 0) s += "Content-Length: " + ContentLength() + "\n";
@@ -265,14 +272,33 @@ public class HttpResponseHeader extends HttpHeader {
 		if(!Status().equals("")) s += "Status: " + Status() + "\n";
 		if(!StrictTransportSecurity().equals("")) s += "Strict-Transport-Security: " + StrictTransportSecurity() + "\n";
 		if(!Trailer().equals("")) s += "Trailer: " + Trailer() + "\n";
-		if(!TransferEncoding().equals("")) s += "Transfer-Encoding: " + TransferEncoding() + "\n";
+		//if(!TransferEncoding().equals("")) s += "Transfer-Encoding: " + TransferEncoding() + "\n";
 		if(!Upgrade().equals("")) s += "Upgrade: " + Upgrade() + "\n";
 		if(!Vary().equals("")) s += "Vary: " + Vary() + "\n";
 		if(!Via().equals("")) s += "Via: " + Via() + "\n";
 		if(!Warning().equals("")) s += "Warning: " + Warning() + "\n";
 		if(!WwwAuthenticate().equals("")) s += "Www-Authenticate: " + WwwAuthenticate() + "\n";
+		if(!XFrameOptions().equals("")) s += "X-Frame-Options: " + XFrameOptions() + "\n";
 		
 		return s;
+		
+	}
+	
+	@Override
+	public String toString() {
+		
+		String s = "";
+		
+		s += Protocol() + " " + NCode() + " " + SCode() + "\n";
+		s += getHeaderString();
+		
+		return s;
+	
+	}
+	
+	@Override
+	public byte[] toByteArray() {
+		return toString().getBytes();
 	}
 
 }

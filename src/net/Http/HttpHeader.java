@@ -2,12 +2,19 @@ package net.Http;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.Socket;
+import java.util.ArrayList;
 
 public abstract class HttpHeader {
 	
-	public void readHeader(BufferedReader br) throws Exception {
+	public void readHeader(Socket s) throws Exception {
+		
+		BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
+		
 		String headerString = getHeaderString(br);
 		parseHeader(headerString);
+		
 	}
 	
 	private String getHeaderString(BufferedReader br) throws IOException {
@@ -27,16 +34,34 @@ public abstract class HttpHeader {
 	public void parseHeader(String headerString) throws Exception {
 		   
 		String[] lines = headerString.split("\n");
-		processFirstLine(lines[0]);
+		processStatusLine(lines[0]);
 		for(int i=1; i<lines.length; i++)
 			processParameterLine(lines[i]);
 	   
 	}
 	
-	protected abstract void processFirstLine(String line) throws Exception;
+	protected ArrayList<HttpHeaderProperty> getProperties() {
+		
+		ArrayList<HttpHeaderProperty> list = new ArrayList<HttpHeaderProperty>();
+		
+		for(String line : this.getHeaderString().split("\n")){
+			String[] aux = line.split(":", 2);
+			list.add(new HttpHeaderProperty(aux[0], aux[1]));
+		}
+		
+		return list;
+		
+	}
+
+	
+	protected abstract void processStatusLine(String line) throws Exception;
 	
 	protected abstract void processParameterLine(String line);
 	
+	public abstract String getHeaderString();
+	
 	public abstract String toString();
+	
+	public abstract byte[] toByteArray();
 	
 }

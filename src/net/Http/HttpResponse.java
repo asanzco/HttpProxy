@@ -1,7 +1,7 @@
 package net.Http;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.Socket;
 import java.util.List;
@@ -21,20 +21,15 @@ public class HttpResponse {
 	}
 	
 	public void readHttpResponse(Socket s) throws Exception {
-		BufferedReader br = new BufferedReader(new InputStreamReader(s.getInputStream()));
-		this.header.readHeader(br);
-		this.body.readBody(br, this.header.ContentLength());		
+		this.header.readHeader(s);
+		this.body.readBody(s);
 	}
 	
 	public void readHttpResponse(HttpURLConnection con) throws Exception {
-		
-		BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream()));
-	
-		this.body.readBody(br);
-		
+
 		this.header.NCode(con.getResponseCode());
 		this.header.SCode(con.getResponseMessage());
-		
+
 		String headers = "";
 		Map<String, List<String>> headerFields = con.getHeaderFields();
 		for(String field : headerFields.keySet()) {
@@ -50,10 +45,32 @@ public class HttpResponse {
 		for(String line : headers.split("\n"))
 			this.header.processParameterLine(line);
 		
+		try {
+			this.body.readBody(con);
+		} catch (IOException e) {
+		}
+
 	}
 	
+	@Override
 	public String toString() {
-		return this.header.toString() + "\n" + this.body.toString();
+		
+		String request = this.header.toString();
+		if(this.body.toString().length() > 0) request += "\n" + this.body.toString();
+		
+		return request;
 	}
 	
+	public byte[] toByteArray() throws IOException {
+		
+		ByteArrayOutputStream baos = new ByteArrayOutputStream();
+		
+		baos.write(this.header.toByteArray());
+		if(this.body.toByteArray().length > 0) {
+			baos.write("\n".getBytes());
+			baos.write(this.body.toByteArray());
+		}
+		
+		return baos.toByteArray();
+	}
 }

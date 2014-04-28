@@ -1,58 +1,58 @@
 package net.Http;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.Socket;
 
 public class HttpBody {
 
-	private String content = "";
+	private static final int BUFFER_SIZE = 1024 * 4;
 	
-	public String Content() { return this.content.trim(); }
-	public void Content(String value) { this.content = value.trim(); }
+	private ByteArrayOutputStream baos;
 	
-	public void readBody(BufferedReader br) throws IOException {
-		Content(getBodyString(br));
+	public byte[] ContentByte() { return this.baos.toByteArray(); }
+	public void Content(byte[] content) throws IOException { 
+		this.baos.reset();
+		this.baos.write(content);
+	}
+	public String ContentString() { return this.baos.toString(); }
+	
+	public HttpBody() {
+		baos = new ByteArrayOutputStream();
 	}
 	
-	public void readBody(BufferedReader br, int contentLength) throws IOException {
-		Content(getBodyString(br, contentLength));
+	public void readBody(Socket s) throws IOException {
+		readBody(new BufferedInputStream(s.getInputStream()));
 	}
 	
-	private String getBodyString(BufferedReader br) throws IOException {
-		
-		StringBuilder builder = new StringBuilder();
-		
-		String line = br.readLine();
-		while(line != null) {
-			builder.append(line + "\n");
-			line = br.readLine();
-		}
-		
-		return builder.toString();
-		
+	public void readBody(HttpURLConnection con) throws IOException {
+		readBody(new BufferedInputStream(con.getInputStream()));
 	}
 	
-	private String getBodyString(BufferedReader br,  int contentLength) throws IOException {
+	public void readBody(BufferedInputStream bis) throws IOException {
 		
-		String result = "";
+		byte[] buffer = new byte[BUFFER_SIZE];
+		int nread = 0;
 		
-		if(contentLength > 0) {
-			StringBuilder builder = new StringBuilder();
-			int nr = 0;
-			String line = "";
-			while(nr < contentLength) {
-				line = br.readLine();
-				builder.append(line + "\n");
-				nr += line.length();
+		while(bis.available() > 0) {
+			try {
+				Thread.sleep(100);
+			} catch (InterruptedException e) {
 			}
-			result = builder.toString();
+			nread = bis.read(buffer);
+			if(nread <= 0) break;
+			baos.write(buffer, 0, nread);
 		}
-					
-		return result;
 	}
 	
 	public String toString() {
-		return Content();
+		return ContentString();
+	}
+	
+	public byte[] toByteArray() {
+		return ContentByte();
 	}
 	
 }

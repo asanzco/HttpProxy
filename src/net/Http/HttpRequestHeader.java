@@ -120,7 +120,7 @@ public class HttpRequestHeader extends HttpHeader {
 	public void Warning(String value) { this.warning = value.trim(); }
 	
 	@Override
-	protected void processFirstLine(String line) throws Exception {
+	protected void processStatusLine(String line) throws Exception {
 		
 		String[] fields = line.trim().split(" ");
 		
@@ -239,19 +239,18 @@ public class HttpRequestHeader extends HttpHeader {
 	}
 	
 	@Override
-	public String toString() {
+	public String getHeaderString() {
 		
 		String s = "";
 		
-		s += Method() + " " + Path() + " " + Protocol() + "\n";
 		if(!Accept().isEmpty()) s += "Accept: " + Accept() + "\n";
 		if(!AcceptCharset().isEmpty()) s += "Accept-Charset: " + AcceptCharset() + "\n";
 		if(!AcceptDatetime().isEmpty()) s += "Accept-Datetime: " + AcceptDatetime() + "\n";
 		if(!AcceptEncoding().isEmpty()) s += "Accept-Encoding: " + AcceptEncoding() + "\n";
 		if(!AcceptLanguage().isEmpty()) s += "Accept-Language: " + AcceptLanguage() + "\n";
 		if(!Authorization().isEmpty()) s += "Authorization: " + Authorization() + "\n";
-		if(!CacheControl().isEmpty()) s += "Cache-Control: " + CacheControl() + "\n";
-		if(!Connection().isEmpty()) s += "Connection: " + Connection() + "\n";
+		//if(!CacheControl().isEmpty()) s += "Cache-Control: " + CacheControl() + "\n";
+		//if(!Connection().isEmpty()) s += "Connection: " + Connection() + "\n";
 		if(ContentLength() >= 0) s += "Content-Length: " + ContentLength() + "\n";
 		if(!ContentMD5().isEmpty()) s += "Content-MD5: " + ContentMD5() + "\n";
 		if(!ContentType().isEmpty()) s += "Content-Type: " + ContentType() + "\n";
@@ -278,6 +277,23 @@ public class HttpRequestHeader extends HttpHeader {
 		
 		return s;
 		
+	}
+	
+	@Override
+	public String toString() {
+		
+		String s = "";
+		
+		s += Method() + " " + Path() + " " + Protocol() + "\n";
+		s += getHeaderString();
+		
+		return s;
+		
+	}
+	
+	@Override
+	public byte[] toByteArray() {
+		return toString().getBytes();
 	}
 
 }
