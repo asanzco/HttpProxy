@@ -1,12 +1,21 @@
 package net;
 
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.security.SignatureException;
+import java.net.URISyntaxException;
 
-import net.Http.HttpRequest;
-import net.Http.HttpResponse;
-
+import org.apache.http.HttpRequest;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpUriRequest;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.protocol.HTTP;
+import org.apache.http.protocol.HttpProcessor;
+import org.apache.http.protocol.HttpProcessorBuilder;
+import org.apache.http.protocol.HttpRequestExecutor;
+import org.apache.http.protocol.ResponseConnControl;
+import org.apache.http.protocol.ResponseContent;
+import org.apache.http.protocol.ResponseDate;
+import org.apache.http.protocol.ResponseServer;
 import org.ccnx.ccn.CCNHandle;
 import org.ccnx.ccn.CCNInterestHandler;
 import org.ccnx.ccn.config.ConfigurationException;
@@ -18,11 +27,15 @@ import org.ccnx.ccn.protocol.MalformedContentNameStringException;
 
 public class NetFetch implements CCNInterestHandler {
 	
-	public static String DEFAULT_URI = "ccnx:/";
+	// HTTP
+    protected HttpRequestExecutor httpExecutor;
+	protected HttpProcessor httpproc;
 	
-	protected boolean _finished = false;
+	// CCNX
+	public static final String DEFAULT_URI = "ccnx:/httpproxy";
 	protected ContentName _prefix;
 	protected CCNHandle _handle;
+	protected boolean _finished = false;
 	
 	public NetFetch() throws MalformedContentNameStringException, ConfigurationException, IOException {
 		this(DEFAULT_URI);
@@ -35,8 +48,19 @@ public class NetFetch implements CCNInterestHandler {
 		
 	}
 	
-	public void launch() throws ConfigurationException, MalformedContentNameStringException, IOException  {
+	public void launch() throws ConfigurationException, MalformedContentNameStringException, IOException, URISyntaxException, Exception {
 		_handle.registerFilter(_prefix, this);
+		
+		// Set up HTTP protocol processor for outgoing connections
+		httpproc = HttpProcessorBuilder.create()
+	    		.add(new ResponseDate())
+	    		.add(new ResponseServer())
+	    		.add(new ResponseContent())
+	    		.add(new ResponseConnControl()).build();
+
+        // Set up outgoing request executor
+        httpExecutor = new HttpRequestExecutor();
+
 	}
 	
 	public void shutdown() {
@@ -60,36 +84,37 @@ public class NetFetch implements CCNInterestHandler {
 			return false;
 		} 
 		
-		HttpRequest httpRequest;
 		try {
-			httpRequest = Utils.parseHttpRequest(_prefix, interest);
-			System.out.println(".............................");
-			System.out.println("REQUEST");
-			System.out.println(httpRequest.toString());
-			System.out.println(".............................");
-			System.out.println("Sending request....");
-			HttpURLConnection con = httpRequest.sendRequest();
-			HttpResponse httpResponse = new HttpResponse();
-			System.out.println("Reading response....");
-			httpResponse.readHttpResponse(con);
-			System.out.println(".............................");
-			System.out.println("RESPONSE");
-			System.out.println(httpResponse.toString());
-			System.out.println(".............................");
+			HttpRequest httpRequest = Utils.parseHttpRequest(_prefix, interest);
+			System.out.println(">REQUEST: " + httpRequest.toString());
 			
+			// Remove hop-by-hop headers
+			httpRequest.removeHeaders(HTTP.CONTENT_LEN);
+			httpRequest.removeHeaders(HTTP.TRANSFER_ENCODING);
+			httpRequest.removeHeaders(HTTP.CONN_DIRECTIVE);
+            
+			CloseableHttpClient httpclient = HttpClients.createDefault();
+			HttpUriRequest hur = Utils.parseHttpUriRequest(httpRequest);
+			HttpResponse httpResponse = httpclient.execute(hur);
+			System.out.println(">RESPONSE: " + httpResponse.toString());
+			
+			// Remove hop-by-hop headers
+			httpResponse.removeHeaders(HTTP.CONTENT_LEN);
+			httpResponse.removeHeaders(HTTP.TRANSFER_ENCODING);
+			httpResponse.removeHeaders(HTTP.CONN_DIRECTIVE);
+            
+			String response = Utils.encodeResponse(httpResponse);
 			CCNWriter cw;
 			try {
 				cw = new CCNWriter(interest.getContentName(), _handle);
 				cw.addOutstandingInterest(interest);
-				cw.put(ContentName.fromNative(interest.name().toString() + "/size" + httpResponse.toByteArray().length), httpResponse.toByteArray());
+				cw.put(ContentName.fromNative(interest.name().toString() + "/length" + response.length()), response);
 				cw.close();
 				return true;
 			} catch (IOException e) {
-			} catch (SignatureException e) {
-			} catch (MalformedContentNameStringException e) {
 			}
-		} catch (IOException e) {
 		} catch (Exception e) {
+			System.out.println(e.getMessage());
 		}			
 
 		return false;
@@ -118,6 +143,10 @@ public class NetFetch implements CCNInterestHandler {
 			System.err.println(">Configuration exception running netfetch: " + e.getMessage());
 		} catch (IOException e) {
 			System.err.println(">IOException handling ccn packages: " + e.getMessage());
+		} catch (URISyntaxException e) {
+			System.err.println(">URISyntaxException: " + e.getMessage());
+		} catch (Exception e) {
+			System.err.println(">Exception: " + e.getMessage());
 		} finally {
 			if (null != netfetch) 
 				netfetch.shutdown();

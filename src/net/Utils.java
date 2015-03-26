@@ -1,104 +1,90 @@
 package net;
 
 import java.io.IOException;
+import java.io.StringReader;
 
-import net.Http.HttpRequest;
-
+import org.apache.http.HttpRequest;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpUriRequest;
 import org.ccnx.ccn.protocol.ContentName;
 import org.ccnx.ccn.protocol.Interest;
 import org.ccnx.ccn.protocol.MalformedContentNameStringException;
 import org.springframework.security.crypto.codec.Base64;
 
+import com.thoughtworks.xstream.XStream;
+import com.thoughtworks.xstream.io.xml.DomDriver;
+
 public class Utils {
 	
 	public static Interest parseInterest(ContentName prefix, HttpRequest httpRequest) throws MalformedContentNameStringException, IOException {
-		/*
-		String path = httpRequest.Header().Path();
-		if (path.startsWith("http://")) path = path.substring(7);
-		if (path.startsWith("https://")) path = path.substring(8);
-		path = "/" + path;
+				
+		XStream xStream = new XStream(new DomDriver("UTF-8"));
+		String requestXml = xStream.toXML(httpRequest).replace("&#x0;", "");
 		
-		String method = httpRequest.Header().Method().toString();
-		System.out.println(a);
-		Interest interest = new Interest(prefix + method + path + a);
-		System.out.println("interest: " + interest.name().toString());
-		interest.answerOriginKind(0);
-		*/
+		String requestBase64 = new String(Base64.encode(requestXml.getBytes()));
+		String requestEncoded = requestBase64.replace("=", "/1").replace("+", "/2");
 		
-		String request = new String(Base64.encode(httpRequest.toByteArray()));
-		
-		Interest interest = new Interest(prefix + request.replace("=", "/1"));
-		interest.answerOriginKind(0);
+		Interest interest = new Interest(prefix + requestEncoded);
+		interest.answerOriginKind(0); 
 		
 		return interest;
 		
 	}
 
-	public static HttpRequest parseHttpRequest(ContentName prefix, Interest interest) throws Exception {
+	public static HttpRequest parseHttpRequest(ContentName prefix, Interest interest) {
 		
-		HttpRequest httpRequest = new HttpRequest();
-		/*
-		String aux = interest.name().toString().substring(prefix.toString().length());
-		String[] auxSplited = aux.split("/", 2);
+		String requestEncoded = interest.name().toString().substring(prefix.toString().length());
+		String requestBase64 = requestEncoded.replace("/1", "=").replace("/2", "+");
 		
-		httpRequest.Header().Method(auxSplited[0]);
-		httpRequest.Header().Path("http://" + auxSplited[1]);
-		*/
+		String requestXml = new String(Base64.decode(requestBase64.getBytes())).replace("&#x0;", "");
 		
-		byte[] request = Base64.decode(interest.name().toString().substring(prefix.toString().length()).replaceAll("/1", "=").getBytes());
-		httpRequest.parseRequest(request);
+		XStream xStream = new XStream(new DomDriver("UTF-8"));
+		Object pack = xStream.fromXML(new StringReader(requestXml));
 		
-		return httpRequest;
+		return (HttpRequest)pack;
+		
+	}
+	
+	public static String encodeResponse(HttpResponse httpResponse) {
+		
+		XStream xStream = new XStream(new DomDriver("UTF-8"));
+		String responseXml = xStream.toXML(httpResponse).replace("&#x0;", "");
+		
+		String responseBase64 = new String(Base64.encode(responseXml.getBytes()));
+		String responseEncoded = responseBase64.replace("=", "/1").replace("+", "/2");
+
+		return responseEncoded;
 		
 	}
 
-	/*
-	 
-	public static HttpResponse parseHttpRespose(String httpResponseString) throws Exception {
+	public static HttpResponse decodeResponse(String response) {
 		
-		HttpResponse httpResponse = new HttpResponse();
+		String responseBase64 = response.replace("/1", "=").replace("/2", "+");
 		
-		String[] splited = httpResponseString.split("\n");
+		String requestXml = new String(Base64.decode(responseBase64.getBytes())).replace("&#x0;", "");
+		
+		XStream xStream = new XStream(new DomDriver("UTF-8"));
+		Object request = xStream.fromXML(new StringReader(requestXml));
+		
+		return (HttpResponse)request;
+		
+	}
 	
-		int i = 0;
+	public static HttpUriRequest parseHttpUriRequest(HttpRequest httpRequest) {
 		
-		StringBuilder builderHeader = new StringBuilder();
-		for(;!splited[i].equals(""); i++)
-			builderHeader.append(splited[i] + "\n");
-		httpResponse.Header().parseHeader(builderHeader.toString());
+		HttpUriRequest httpUriRequest = null;
 		
-		StringBuilder builderBody = new StringBuilder();
-		for(; i < splited.length; i++)
-			builderBody.append(splited[i] + "\n");
-		//httpResponse.Body().Content(builderBody.toString());
-		
-		return httpResponse;
+		String method = httpRequest.getRequestLine().getMethod();
 
+		if (method.equalsIgnoreCase("GET"))
+			httpUriRequest = new HttpGet(httpRequest.getRequestLine().getUri());
+		
+		if (httpUriRequest != null)
+			httpUriRequest.setHeaders(httpRequest.getAllHeaders());
+		
+		return httpUriRequest;
 	}
-	
-	public static HttpResponse parseHttpResponse(ContentObject contentObject) throws Exception {
-		
-		HttpResponse httpResponse = new HttpResponse();
-		
-		String[] contentSplited = Component.printNative(contentObject.content()).split("\n");
-	
-		int i = 0;
-		
-		StringBuilder builderHeader = new StringBuilder();
-		for(;!contentSplited[i].equals(""); i++)
-			builderHeader.append(contentSplited[i] + "\n");
-		httpResponse.Header().parseHeader(builderHeader.toString());
-		
-		StringBuilder builderBody = new StringBuilder();
-		for(; i < contentSplited.length; i++)
-			builderBody.append(contentSplited[i] + "\n");
-		//httpResponse.Body().Content(builderBody.toString());
-		
-		return httpResponse;
-		
-	}
-	
-	*/
 
 }
 

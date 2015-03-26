@@ -1,11 +1,10 @@
 package net;
 
-import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
@@ -13,6 +12,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.Hashtable;
 
+import org.apache.http.ConnectionClosedException;
+import org.apache.http.HttpConnectionFactory;
+import org.apache.http.HttpException;
+import org.apache.http.HttpRequest;
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpServerConnection;
+import org.apache.http.MethodNotSupportedException;
+import org.apache.http.impl.DefaultBHttpServerConnection;
+import org.apache.http.impl.DefaultBHttpServerConnectionFactory;
 import org.ccnx.ccn.CCNContentHandler;
 import org.ccnx.ccn.CCNHandle;
 import org.ccnx.ccn.config.ConfigurationException;
@@ -22,22 +30,32 @@ import org.ccnx.ccn.protocol.Interest;
 import org.ccnx.ccn.protocol.MalformedContentNameStringException;
 
 import net.Utils;
-import net.Http.HttpRequest;
-
 
 public class HttpProxy {
-
-	private static final String ListFileName = "HttpProxy.list";
 	
+	// HttpProxy.list
+	private static final String ListFileName = "HttpProxy.list";
 	private ArrayList<HttpProxyListElement>HttpProxyList = new ArrayList<HttpProxyListElement>();
 	
+	// HTTP
 	public static final int PortServer = 8080;
-	private static ServerSocket ss;
 	
-	public static String DEFAULT_URI = "ccnx:/";	
+	// CCNX
+	public static String DEFAULT_URI = "ccnx:/httpproxy";	
 	private ContentName _prefix;
 	private ContentHandler _handler;
 	
+	public static void main(String[] args) {
+		
+		HttpProxy proxy;
+		try {
+			proxy = new HttpProxy();
+			proxy.launch();
+		} catch (Exception e) {
+			System.err.println(">" + e.getMessage());
+		}
+		
+	}
 	
 	public HttpProxy() throws MalformedContentNameStringException, Exception{
 		this(DEFAULT_URI);
@@ -50,24 +68,15 @@ public class HttpProxy {
 		} catch (IOException e) {
 			throw new Exception("IOException reading HttpProxy.list: " + e.getMessage());
 		} catch (Exception e) {
-			throw new Exception("Exception geting HttpProxy.list: " + e.getMessage());
-		}
-		
-		try {
-			// Initialize server socket
-			ss = new ServerSocket(PortServer);
-		} catch (IOException e) {
-			throw new Exception("IOException initializing ServerSocket: " + e.getMessage());
+			throw new Exception("Exception getting HttpProxy.list: " + e.getMessage());
 		}
 		
 		_prefix = ContentName.fromURI(ccnxURI);
-		_handler = new ContentHandler();
 
 	}
 	
 	private void getHttpProxyList() throws IOException, Exception {
-		
-		
+				
 		String fileName = (new File(".")).getAbsolutePath() + "/src/net/" + ListFileName;
 		File file = new File(fileName);
 		if(!file.exists()) throw new Exception("Not found 'HttpProxy.list");
@@ -82,83 +91,90 @@ public class HttpProxy {
 		br.close();
 		
 	}
-	
+
 	public void launch() throws IOException{
-		for(;;) {
-			
-			try {
-				Socket s = ss.accept();
-				(new ServeRequest(s)).start();
-			} catch (IOException e) {
-				throw new IOException("IOException accepting new client: " + e.getMessage());
-			}
-			
-		}
-	}
-	
-	public static void main(String[] args) {
 		
-		HttpProxy proxy;
-		try {
-			proxy = new HttpProxy();
-			proxy.launch();
-		} catch (Exception e) {
-			System.err.println(">" + e.getMessage());
-		}
-		
+		// Set Content handler
+		_handler = new ContentHandler();
+			    
+	  	Thread t = new RequestListenerThread(PortServer);
+	  	t.setDaemon(false);
+	  	t.start();
+	    
 	}
 
-	private class ServeRequest extends Thread {
-		
-		private Socket s;
-		
-		public ServeRequest(Socket s) {
-			this.s = s;
-		}
-		
-		public void run() {
-			
-			try {
-				// Get the HttpRequest from the net
-				HttpRequest httpRequest = new HttpRequest();
-				httpRequest.readHttpRequest(s);
-								
-				// If it can be send it will be sent to netfetch via CCN
-				if(!canBeSent(httpRequest)) throw new Exception("Url not supported");
-				SendInterest(httpRequest);
-				
-			} catch (Exception e) {
-				System.err.println(">Error handling httpRequest: " + e.getMessage());
-			}
-			
-		}
-		
-		private void SendInterest(HttpRequest httpRequest) throws MalformedContentNameStringException, ConfigurationException, IOException {
+	private class RequestListenerThread extends Thread {
 
-			Interest interest = Utils.parseInterest(_prefix, httpRequest);
-			System.out.println(".............................");
-			System.out.println("REGISTERING REQUEST");
-			System.out.println(httpRequest.toString());
-			System.out.println(".............................");
-			_handler.registerInterest(interest, s);
-						
-		}
-		
-		private boolean canBeSent(HttpRequest hr) throws Exception {
+        private final HttpConnectionFactory<DefaultBHttpServerConnection> connFactory;
+        private final ServerSocket serversocket;
+
+        public RequestListenerThread(int port) throws IOException {
+            this.connFactory = DefaultBHttpServerConnectionFactory.INSTANCE;
+            this.serversocket = new ServerSocket(port);
+        }
+
+        @Override
+        public void run() {
+            System.out.println(">Listening on port " + this.serversocket.getLocalPort());
+            while (!Thread.interrupted()) {
+                try {
+                    // Set up HTTP connection
+                    Socket socket = this.serversocket.accept();
+                    System.out.println(">Incoming connection from " + socket.getInetAddress());
+                    HttpServerConnection conn = this.connFactory.createConnection(socket);
+                    
+                    System.out.println(">New connection thread");
+                    try {
+                    	HttpRequest request = conn.receiveRequestHeader();
+                    	String method = request.getRequestLine().getMethod();
+        				if (!method.equals("GET")){
+        					throw new MethodNotSupportedException(method + " method not supported");
+        				}
+        				// If it can be send it will be sent to netfetch via CCN
+        				if(!canBeSent(request)) throw new Exception("Url not supported");
+        				SendInterest(request, conn);
+                    } catch (ConnectionClosedException ex) {
+                        System.err.println("Client closed connection");
+                    } catch (IOException ex) {
+                        System.err.println("I/O error: " + ex.getMessage());
+                    } catch (HttpException ex) {
+                        System.err.println("Unrecoverable HTTP protocol violation: " + ex.getMessage());
+                    } catch (Exception ex) {
+                        System.err.println("Error: " + ex.getMessage());
+        			} 
+                } catch (InterruptedIOException ex) {
+                    break;
+                } catch (IOException e) {
+                    System.err.println("I/O error initialising connection thread: " + e.getMessage());
+                    break;
+                }
+            }
+            
+        }
+        
+        private boolean canBeSent(HttpRequest hr) throws Exception {
 			for(HttpProxyListElement element : HttpProxyList) 
 				for(TrailingSwitch.TrailingSwitches trailingSwitch : element.getTrailingSwitches())
 					if(TrailingSwitch.checkTrailingSwitch(hr, element.getUrl(), trailingSwitch)) return true;
 			return false;
 		}
 		
-	}
-	
+		private void SendInterest(HttpRequest request, HttpServerConnection conn) throws MalformedContentNameStringException, ConfigurationException, IOException {
+
+			Interest interest = Utils.parseInterest(_prefix, request);
+			System.out.println(">REGISTERING REQUEST: " + request.toString());
+						
+			_handler.registerInterest(interest, conn);
+						
+		}
+    }
+    
 	private class ContentHandler implements CCNContentHandler {
 		
-		private Hashtable<String, ArrayList<Socket>> sockets = new Hashtable<String, ArrayList<Socket>>();
-		private Hashtable<String, ByteArrayOutputStream> responsesRaw = new Hashtable<String, ByteArrayOutputStream>();
-		private Hashtable<String, byte[]> responses = new Hashtable<String, byte[]>();
-		
+		private Hashtable<String, ArrayList<HttpServerConnection>> petitions = new Hashtable<String, ArrayList<HttpServerConnection>>();
+		private Hashtable<String, String> responsesEncoded = new Hashtable<String, String>();
+		private Hashtable<String, HttpResponse> responses = new Hashtable<String, HttpResponse>();
+				
 		@Override
 		public Interest handleContent(ContentObject contentObject, Interest interest) {
 			
@@ -166,49 +182,44 @@ public class HttpProxy {
 			
 			String name = "";
 			int segment = 0;
-			int size = 0;
+			int length = 0;
 			
 			String nameData = contentObject.name().toString();
-			Pattern p = Pattern.compile("^((.*)/size(\\d+))(/=([\\dA-F]+))?$");
+			Pattern p = Pattern.compile("^((.*)/length(\\d+))(/=([\\dA-F]+))?$");
 			
 			Matcher matcher = p.matcher(nameData);
 			if (matcher.find()) {
 			    nameData = matcher.group(1);
 			    name = matcher.group(2);
-			    size = Integer.parseInt(matcher.group(3));
+			    length = Integer.parseInt(matcher.group(3));
 			    segment = Integer.parseInt(matcher.group(5), 16);	    
 			}
 
-			synchronized (responsesRaw) {
-				ByteArrayOutputStream response;
-				if(responsesRaw.containsKey(name)) {
-					response = responsesRaw.get(name);
-					responsesRaw.remove(name);
-					try {
-						response.write(contentObject.content());
-					} catch (IOException e) {
-					}
+			synchronized (responsesEncoded) {
+				String response;
+				if(responsesEncoded.containsKey(name)) {
+					response = responsesEncoded.get(name);
+					responsesEncoded.remove(name);
+					// Add new data recieved
+					String recieved = new String(contentObject.content());
+					response += recieved;
 				} else {
-					response = new ByteArrayOutputStream();
-					try {
-						response.write(contentObject.content());
-					} catch (IOException e) {
-					}
+					response = new String(contentObject.content());
 				}
 				try {
-					if(response.size() >= size) {
-						System.out.println(">DATA RECIEVED: '" + nameData + "' : " + segment + ": COMPLETED!" + " #for interest : " + name);
+					if(response.length() >= length) {
+						System.out.println(">DATA RECIEVED: " + segment + ": COMPLETED! '" + nameData + "' #for interest : " + name);
 						sendData = true;
 						synchronized (responses) {
-							responses.put(name, response.toByteArray());
+							responses.put(name, Utils.decodeResponse(response));
 						}
 					} else {
-						System.out.println(">DATA RECIEVED: '" + nameData + "' : " + segment + ": INCOMPLETED " + response.size() + "/" + size + " #for interest : " + name);
-						responsesRaw.put(name, response);
+						System.out.println(">DATA RECIEVED: " + segment + ": INCOMPLETED " + response.length() + "/" + length + " '"+ nameData + "' #for interest : " + name);
+						responsesEncoded.put(name, response);
 					}			
 				
 				} catch (Exception e) {
-					responsesRaw.put(name, response);
+					responsesEncoded.put(name, response);
 				}				
 			}
 				
@@ -221,7 +232,7 @@ public class HttpProxy {
 				try {
 					String newSegment = String.format("%0$"+4+"s", Integer.toHexString(segment+1)).replace(" ", "0");
 					interest.name(ContentName.fromURI(nameData + "/=" + newSegment));
-					System.out.println(">GENERATED NEW INTEREST: " + interest.name().toString() + " #for interest : " + name);
+					System.out.println(">GENERATED NEW INTEREST: " + newSegment + " : " + interest.name().toString() + " #for interest : " + name);
 					return interest;
 				} catch (MalformedContentNameStringException e) {
 				}
@@ -232,41 +243,42 @@ public class HttpProxy {
 		
 		private void SendRespose(String name) {
 			
-			byte[] response;
+			HttpResponse response;
 			synchronized (responses) {
 				response = responses.get(name);
 				responses.remove(name);
 			}
-			synchronized (sockets) {
-				for(Socket s : sockets.get(name)) {
+			synchronized (petitions) {
+				for(HttpServerConnection conn : petitions.get(name)) {
 					try {
-						BufferedOutputStream bos = new BufferedOutputStream(s.getOutputStream());
-						System.out.println(">SENDING to " + s + "...... " + name + " (" +response.length + ")");
-						bos.write(response);
-						bos.close();
-						s.close();
+						System.out.println(">SENDING TO [" + conn.toString() + "] :" + name);
+						System.out.println(response.toString());
+						conn.sendResponseHeader(response);
+						conn.sendResponseEntity(response);
+						conn.close();
+					} catch (HttpException e) {
+						e.printStackTrace();
 					} catch (IOException e) {
+						e.printStackTrace();
 					}
 				}
-				sockets.remove(name);
+				petitions.remove(name);
 			}
 		}
 		
-		public void registerInterest(Interest interest, Socket socket) throws IOException {
+		public void registerInterest(Interest interest, HttpServerConnection conn) throws IOException {
 			
 			System.out.println(">REGISTERING NEW INTEREST: " + interest.name());
-			
-			synchronized (sockets) {
-				if(sockets.containsKey(interest.name())) {
-					sockets.get(interest.name()).add(socket);
+			synchronized (petitions) {
+				if(petitions.containsKey(interest.name())) {
+					petitions.get(interest.name()).add(conn);
 				}else{
-					ArrayList<Socket> socketsList = new ArrayList<Socket>();
-					socketsList.add(socket);
-					sockets.put(interest.name().toString(), socketsList);
+					ArrayList<HttpServerConnection> connList = new ArrayList<HttpServerConnection>();
+					connList.add(conn);
+					petitions.put(interest.name().toString(), connList);
+					CCNHandle.getHandle().expressInterest(interest, this);
 				}
 			}
-			
-			CCNHandle.getHandle().expressInterest(interest, this);
 			
 		}
 		
@@ -318,22 +330,25 @@ public class HttpProxy {
 		public static boolean checkTrailingSwitch(HttpRequest httpRequest, String regex, TrailingSwitches trailingSwitch) throws Exception {
 			boolean result = false;
 			Pattern p = Pattern.compile(regex.replace(".", "\\.").replace("*", ".*"));
-			if (p.matcher(httpRequest.Header().Path()).matches()){
+			if (p.matcher(httpRequest.getRequestLine().getUri()).matches()){
 				switch(trailingSwitch){
 				case NONE:
 					result = true;
 					break;
 				case NO_COOKIE:
-					result = !httpRequest.hasCookies();
+					result = (httpRequest.getHeaders("Cookie").length == 0);
 					break;
 				case NO_REFERER:
-					result = true;
+					result = (httpRequest.getHeaders("Referer").length == 0);
 					break;
 				case NEED_DOT:
-					result = true;
+					result = httpRequest.getRequestLine().getUri().substring(
+							httpRequest.getRequestLine().getUri().indexOf(
+									httpRequest.getFirstHeader("Host").getValue() + httpRequest.getFirstHeader("Host").getValue().length()))
+							.contains(".");
 					break;
 				case NO_QUERY:
-					result = true;
+					result = !httpRequest.getRequestLine().getUri().contains("?");
 					break;
 				case SINGLE:
 					result = true;
